@@ -12,7 +12,7 @@
                     @csrf
 
                     <label>Widgets</label>
-                    <input class="@error('widgets') error-border @enderror" type="number" name="widgets" value="{{ old('widgets', session('widgets')) }}" min="2" max="50000">
+                    <input class="@error('widgets') error-border @enderror" type="number" name="widgets" value="{{ old('widgets', session('widgets')) }}" min="2" max="1000000">
                     @error('title')
                         <div class="error">
                             {{ $message }}
@@ -27,8 +27,8 @@
         @if (session('globalPackSizes'))
             <div class="post-item">
                 <div class="post-content">
-                    @foreach (Session::get('globalPackSizes') as $result)
-                        <p>{{$result}}</p>
+                    @foreach (Session::get('globalPackSizes') as $key => $value)
+                        <p>{{$key}} Pack: {{ $value }}</p>
                     @endforeach
                 </div>
             </div>

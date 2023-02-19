@@ -8,17 +8,8 @@ use App\Models\PackSizes;
 //to avoid memory leaks, the algorithm must have better complexity
 $old = ini_set('memory_limit', '8192M');
 
-$globalPackSizes = array();
-$globalPacks = array();
-$globalReturnMessage = array();
+//store error messages
 $globalError = "";
-
-class Pack 
-{
-	public $overallAmount;
-    public $amounts;
-    public $widgets;
-}
 
 class PackSizeCalculationController extends Controller
 {
@@ -27,31 +18,23 @@ class PackSizeCalculationController extends Controller
     {
 
         $widgets = $request->widgets;
-        $this->globalPackSizes = PackSizes::select('PackSize')->pluck('PackSize')->toArray();
+        $pack_sizes = PackSizes::select('PackSize')->pluck('PackSize')->toArray();
 
         //perform validation, we need the data in the right format
 
         $request->validate([
-            'widgets' => 'required|numeric|min:2|max:50000'
+            'widgets' => 'required|numeric|min:2|max:1000000'
         ]);
 
-        if (!$this->Validaton($widgets, $this->globalPackSizes))
+        if (!$this->Validaton($widgets, $pack_sizes))
         {
             return redirect('/')->withErrors($this->globalError);
         }
 
-        $globalBestPacks = [];
-
-        $this->globalReturnMessage[] = "========First Pack Combination========";
-        $this->OptimizePacks($this->globalPackSizes, $widgets, $globalBestPacks);
-
-        $amounts = array_reverse($this->globalPackSizes);
-        $this->globalPacks = array();
-        $this->Change($newList = array(), $amounts, 0, 0, $widgets);
-        $this->FindLowestAmounts();
+		$packs_to_send = $this->get_packs($widgets, $pack_sizes);
 
         session()->put('widgets', $widgets);
-        return redirect('/')->with('globalPackSizes', $this->globalReturnMessage);
+        return redirect('/')->with('globalPackSizes', $packs_to_send);
     }
 
     function Validaton($widgets, $globalPackSizes)
@@ -68,251 +51,96 @@ class PackSizeCalculationController extends Controller
     //===============
     //PRIVATE METHODS
     //===============
-    function OptimizePacks($packSizes,$number, $bestPacks)
-    {
 
-	    //keep this for later use
-	    $target = $number;
-	
-	    //sort array in decending order
-	    $packSizes = array_reverse($packSizes);
-	
-	    //create default array
-	    $requiredPacks = array_fill_keys($packSizes, 0);
-	
-	    foreach($packSizes as $size)
-	    {
-		    //divide and round down
-		    $packs = floor($number / $size);
-		
-		    if ($packs > 0) {
-                $requiredPacks[$size] = $packs;
-                $number -= $packs*$size;
-            }
-	    }
-	
-	    //remove the largest element from array for recursion
-	    $packSizesTemp = $packSizes;
-	    $index = 0;
-	
-	    //find the index of largest element
-	    foreach($requiredPacks as $value)
-	    {
-		    if ($value > 0)
-		    {
-			    break;
-		    }
-		
-		    $index++;
-	    }
+	function get_packs($order_size, $pack_sizes) 
+	{
 
-	    //we must counter for numbers lower than the lowest pack size, otherwise, index will be higher than collection
-	    if ($index > count($requiredPacks) - 1)
-	    {
-		    $index--;
-	    }
-	
-	    //if we have reached the lowest pack size index, return
-	    $packIndex = array_search(min($packSizes), $packSizes);
-	    if ($index != $packIndex)
-	    {
-		    unset($packSizesTemp[$index]);
-		    $packSizesTemp = array_values($packSizesTemp);
-		    $packSizes = $packSizesTemp;
-	    }
-	
-	    if ($number > 0)
-	    {
-		    //find lowest pack and double it to go over widgets
-		    $requiredPacks[min($packSizes)]++;
-		
-		    //now find the sum of all packs of widgets
-		    $total = 0;
-		    foreach($requiredPacks as $key => $value)
-		    {
-		 	    if ($value > 0)
-		 	    {
-		 		    $total += ($key * $value);
-		 	    }
-		    }
-		 
-		    //do we already have a single pack which would fufill required widgets with leftovers
-		    if (array_key_exists((int)$total, $requiredPacks))
-		    {
-		 	     //reduce everything below or equal to total to 0
-		 	    foreach($requiredPacks as $key => $value)
-		 	    {
-		 	 	    if ($key <= $total)
-		 	 	    {
-		 	 		    $requiredPacks[$key] = 0;
-                    }
-		 	    }
-		 	 
-		 	    //and add this new pack, i.e. we would rather have less packs of more quantity, than more packs of same quantity
-		 	    $requiredPacks[$total]++;
-		    }
-		 
-            //print the results
-		 	foreach($requiredPacks as $key => $value)
-		 	{
-                $this->globalReturnMessage[] = $key . ": " . $value;
-		 	}
-		 
-		    $bestPacks[] = $requiredPacks;
-		 
-		    //do a bit of a recursion where the highest number is taken out, just to check for other combinations that are lower
-            //i.e 800 + 250 to reach 1015 is better than 1000 + 250
-         
-            if ($index != $packIndex)
-            {
-                $this->globalReturnMessage[] = "========Other Pack Combination========";
-         	
-        	    //sort array in ascending order to be reversed again on recursion
-			    $packSizes = array_reverse($packSizes);
-			    $this->OptimizePacks($packSizes, $target, $bestPacks);
-            }
-         
-            //final result
-            else 
-            {
-         	    $minNumberOfWidgets = INF;
-         	
-         	    //now find the best pack from the best solutions found based on the wastage of widgets
-         	    foreach($bestPacks as $bestPacksVar)
-         	    {
-         		    $totalNumOfWidgets = 0;
-         		
-         		    foreach($bestPacksVar as $pk => $pv)
-         		    {
-         			    $totalNumOfWidgets += ($pk * $pv);
-         		    }
-         		
-         		    if ($totalNumOfWidgets < $minNumberOfWidgets)
-         		    {
-         			    $minNumberOfWidgets = $totalNumOfWidgets;
-                        $bestPack = $bestPacksVar;
-         		    }
-         	    }
-         	
-         	    //one final check to see if there is a better solution
-                //compare final result with possible shorter packs with other numbers in the orginal collection
-            
-                $this->globalReturnMessage[] = "========Best Overall Combination========";
-                unset($this->packs);
-            
-			    $amounts = array_reverse($this->globalPackSizes);
-                $this->Change($newArray = array(), $amounts, 0, 0, $minNumberOfWidgets);
-            
-                if (!$this->FindLowestAmounts())
-                {
-            	    $this->globalReturnMessage[] = "========Best Overall Combination========";
-            	    //print the results
-            	    $this->globalReturnMessage[] = print_r($bestPack, true);
-                }
-            }
-	    }
-    }
+    	//sort array in decending order
+		rsort($pack_sizes);
 
-    function Change($widgets, $amounts, $highest, $sum, $goal)
-    {
-	    //see if we are done
-	    if ($sum == $goal)
-	    {
-            $this->Display($widgets, $amounts);
-	 	    return;
-	    }
-	 
-	    //see if we have too much
-	    if ($sum > $goal)
-	    {
-	 	    return;
-	    }
-	 
-	    //loop through amounts
-	    foreach($amounts as $value)
-	    {
-	 	    //only add higher or equal amounts
-	 	    if ($value >= $highest)
-	 	    {
-	 		    $copy = $widgets;
-	 		    array_push($copy, $value);
-	 		    $this->Change($copy, $amounts, $value, $sum + $value, $goal);
-	 	    }
-	    }
-    }
+		//create default array
+		$packs_to_send = array_fill_keys($pack_sizes, 0);
 
-    function Display($widgets, $amounts)
-    {
-	    //count number of occurances
-        //add to lowest set
-        //if lower than lowest set
-        //this is the new lowest
+    	$totalInPacks = 0;
+
+    	// Iterate through the pack sizes and try to use as many packs as possible
+    	foreach ($pack_sizes as $pack_size) 
+    	{
+        	if ($order_size >= $pack_size) 
+        	{
+            	$num_packs = floor($order_size / $pack_size);
+            	$packs_to_send[$pack_size] = $num_packs;
+            	$order_size -= $num_packs * $pack_size;
+            	$totalInPacks += $num_packs * $pack_size;
+        	}
+    	}
+
+    	// If there is still some order left to fulfill, it means we couldn't use any of the larger packs
+    	// and we need to use smaller packs
+    	if ($order_size > 0) 
+    	{
+
+			//find lowest pack and double it to go over widgets
+			$packs_to_send[min($pack_sizes)]++;
+
+        	//update total pack size also
+        	$totalInPacks += $pack_size;
+
+        	$packs_to_send = $this->find_minimum_count($packs_to_send, $totalInPacks);
+    	}
+
+    	return $packs_to_send;
+	}
+
+	function find_minimum_count($pack_sizes, $target) 
+	{
+
+    	$numbers = array_keys($pack_sizes);
+    	sort($numbers);
+
+    	// Initialize a list to keep track of the minimum count of numbers to reach each sum up to the target
+    	$dp = array_fill(0, $target + 1, INF);
+    	$dp[0] = 0; // It takes 0 numbers to reach a sum of 0
+
+    	// Initialize a list to keep track of the numbers used to reach each sum up to the target
+    	$used_nums = array_fill(0, $target + 1, []);
+
+    	for ($i = 1; $i <= $target; $i++) 
+    	{
+        	foreach ($numbers as $num) 
+        	{
+            	if ($num <= $i && $dp[$i - $num] + 1 < $dp[$i]) 
+            	{
+                	// If the current number can be used to reach the current sum and results in a smaller count, update the minimum count and the used numbers list
+                	$dp[$i] = $dp[$i - $num] + 1;
+                	$used_nums[$i] = array_merge($used_nums[$i - $num], [$num]);
+            	}
+        	}
+    	}
+
+    	if ($dp[$target] == INF) 
+    	{
+        	return [-1, []];
+    	} 
     
-        $pack = new Pack();
-        $pack->amounts = $amounts;
-        $pack->widgets = $widgets;
-    
-        $overallCount = 0;
-    
-        foreach($amounts as $amount)
-        {
-    	    $countArr = array_count_values($widgets);
+    	else 
+    	{
 
-		    //check if the countArr contains index, otherwise, it will throw out of bounds error
-		    if(isset($countArr[$amount]))
-		    {
-			    $count = $countArr[$amount];
-		    }
+        	//unset all values for each key
+        	foreach($pack_sizes as $key => $value)
+        	{
+            	$pack_sizes[$key] = 0;
+        	}
 
-		    else
-		    {
-			    $count = 0;
-		    }
-		
-		    $overallCount += $count;
-        }
-    
-        $pack->overallAmount = $overallCount;
-        $this->globalPacks[] = $pack;
-        //array_push($this->globalPacks, $pack);
-    }
+        	foreach($used_nums[$target] as $pack_size)
+        	{
+            	if (array_key_exists((int)$pack_size, $pack_sizes))
+            	{
+                	$pack_sizes[$pack_size] += 1;
+            	}
+        	}
 
-    function FindLowestAmounts()
-    {
-	    if (isset($this->globalPacks) && sizeof($this->globalPacks) > 0)
-	    {
-		    $smallestAmount = array_column($this->globalPacks, 'overallAmount');
-		    $smallestAmount = min($smallestAmount);
-		    $smallestPacks[] = array_column($this->globalPacks, null, 'overallAmount')[$smallestAmount];
-		
-		    foreach($smallestPacks as $pack)
-		    {
-			    foreach($pack->amounts as $amount)
-			    {
-				    $countArr = array_count_values($pack->widgets);
-
-				    //check if the countArr contains index, otherwise, it will throw out of bounds error
-				    if(isset($countArr[$amount]))
-				    {
-					    $count = $countArr[$amount];
-				    }
-
-				    else
-				    {
-					    $count = 0;
-				    }
-				
-                    $this->globalReturnMessage[] = $amount . ": " . $count;
-			    }
-		    }
-		
-		    return true;
-	    }
-
-	    else
-	    {
-		    //$this->globalReturnMessage[] = "Cant calcualte to exact amount";
-		    return false;
-	    }
-    }
+        	return $pack_sizes;
+    	}
+	}   
 }
